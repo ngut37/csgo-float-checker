@@ -1,11 +1,32 @@
 import axios from 'axios';
+import fs from 'fs';
 
 // search params
 const skin: Skin = {
-  type: 'AK-47',
-  theme: 'Asiimov',
-  wear: 'Field-Tested',
+  //type: "StatTrak%E2%84%A2%20MAG-7",
+  type: "Nova",
+  theme: 'Candy Apple',
+  exterior: 'Factory New',
 }
+
+const currentTime = new Date()
+
+const t = {
+  year: currentTime.getFullYear(),
+  month: currentTime.getMonth(),
+  day: currentTime.getDate(),
+  hour: currentTime.getHours(),
+  minute: currentTime.getMinutes(),
+  second: currentTime.getSeconds(),
+}
+
+const formattedFileName = `./output/${t.year} ${t.month} ${t.day} - ${t.hour} ${t.minute} ${t.second} - ${skin.type} - ${skin.theme} (${skin.exterior}).txt`
+
+const logger = fs.createWriteStream(formattedFileName);
+
+logger.on('finish', () => {
+  console.log(`Created file ${formattedFileName}`);
+});
 
 // pagination params
 const pagination: Pagination = {
@@ -17,7 +38,7 @@ const pagination: Pagination = {
 }
 
 // API
-const STEAM_API_URL = `https://steamcommunity.com/market/listings/730/${skin.type}%20%7C%20${skin.theme}%20%28${skin.wear}%29/render/`
+const STEAM_API_URL = `https://steamcommunity.com/market/listings/730/${skin.type}%20%7C%20${skin.theme}%20%28${skin.exterior}%29/render/`
 
 const FLOAT_API_URL = 'https://floats.gainskins.com/'
 
@@ -81,7 +102,7 @@ type FloatResponseBody = {
 type Skin = {
   type: string;
   theme: string;
-  wear: string;
+  exterior: string;
 }
 
 type Pagination = {
@@ -130,7 +151,8 @@ const getListings = async (paginationOptions: Pagination): Promise<SteamResponse
     });
     return response.data;
   } catch (e) {
-    console.log(e.message)
+    logger.write('Steam API request failed' + "\r\n", 'utf8');
+    console.log(e.message);
   }
 }
 
@@ -150,8 +172,13 @@ const getSkinInfo = async (previewUrl: string): Promise<FloatResponseBody | unde
 const logSkinsData = async (): Promise<void | undefined> => {
   pagination.start = 0;
   pagination.currentPage = 1;
+  logger.write(`TOTAL COUNT: ${pagination.totalCount}` + "\r\n", 'utf8')
   try {
     for (pagination.currentPage; pagination.currentPage < pagination.pages + 1; pagination.currentPage++) {
+
+      const currentPagination: string = `PAGE: [${pagination.currentPage}/${pagination.pages}]`;
+
+      console.log(currentPagination);
       const listings = await getListings(pagination);
       const listinginfo = listings?.listinginfo;
 
@@ -179,7 +206,7 @@ const logSkinsData = async (): Promise<void | undefined> => {
       const output = await Promise.all(outputPromises);
       output.forEach(output => {
         if (output && output.iteminfo)
-          console.log(`PAGE: [${pagination.currentPage}/${pagination.pages}] | LISTING_ID: ${output.iteminfo.m} | FLOAT: ${output.iteminfo.floatvalue}`)
+          logger.write(`${currentPagination} | LISTING_ID: ${output.iteminfo.m} | FLOAT: ${output.iteminfo.floatvalue}` + "\r\n", "utf8")
       })
       pagination.start += pagination.count;
     }
@@ -195,6 +222,7 @@ const main = async (): Promise<void> => {
 
 (async function () {
   await main();
+  logger.end();
 })()
 
 
