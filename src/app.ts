@@ -1,11 +1,27 @@
 import axios from 'axios';
 import fs from 'fs';
 
+const STATTRAK = 'StatTrak%E2%84%A2%20';
+
+type GunType = {
+
+}
+
+const exteriorTypes = Object.freeze({
+  'Battle-Scarred': 'Battle-Scarred',
+  'Well-Worn': 'Well-Worn',
+  'Field-Tested': 'Field-Tested',
+  'Minimal Wear': 'Minimal Wear',
+  'Factory New': 'Factory New',
+})
+
+type ExteriorType = keyof typeof exteriorTypes;
+
 // search params
 const skin: Skin = {
-  //type: "StatTrak%E2%84%A2%20MAG-7",
-  type: "Nova",
-  theme: 'Candy Apple',
+  isStatTrak: true,
+  type: 'Desert Eagle',
+  theme: 'Bronze Deco',
   exterior: 'Factory New',
 }
 
@@ -20,7 +36,7 @@ const t = {
   second: currentTime.getSeconds(),
 }
 
-const formattedFileName = `./output/${t.year} ${t.month} ${t.day} - ${t.hour} ${t.minute} ${t.second} - ${skin.type} - ${skin.theme} (${skin.exterior}).txt`
+const formattedFileName = `./output/${t.year} ${t.month} ${t.day} - ${t.hour} ${t.minute} ${t.second} - ${skin.isStatTrak ? STATTRAK : ''}${skin.type} - ${skin.theme} (${skin.exterior}).txt`
 
 const logger = fs.createWriteStream(formattedFileName);
 
@@ -37,8 +53,11 @@ const pagination: Pagination = {
   pages: 0,
 }
 
+// Random number to convert price to EUR
+const CONVERSION_RATE = 87;
+
 // API
-const STEAM_API_URL = `https://steamcommunity.com/market/listings/730/${skin.type}%20%7C%20${skin.theme}%20%28${skin.exterior}%29/render/`
+const STEAM_API_URL = `https://steamcommunity.com/market/listings/730/${skin.isStatTrak ? STATTRAK : ''}${skin.type}%20%7C%20${skin.theme}%20%28${skin.exterior}%29/render/`
 
 const FLOAT_API_URL = 'https://floats.gainskins.com/'
 
@@ -51,11 +70,13 @@ type SteamResponseBody = {
   listinginfo: {
     [id: string]: {
       asset: {
+        id: string;
         market_actions: {
           link: string;
           name: string;
         }[];
-      } & Record<string, any>;
+      },
+      converted_price: number;
     };
   };
   total_count: number;
@@ -95,14 +116,16 @@ type FloatResponseBody = {
     wear_name: string;
     full_item_name: string;
   }
+  price?: number;
   success: boolean;
 }
 
 // Param types
 type Skin = {
+  isStatTrak: boolean;
   type: string;
   theme: string;
-  exterior: string;
+  exterior: ExteriorType;
 }
 
 type Pagination = {
@@ -156,13 +179,13 @@ const getListings = async (paginationOptions: Pagination): Promise<SteamResponse
   }
 }
 
-const getSkinInfo = async (previewUrl: string): Promise<FloatResponseBody | undefined> => {
+const getSkinInfo = async (previewUrl: string, price: FloatResponseBody['price']): Promise<FloatResponseBody | undefined> => {
   try {
     const response = await axios.get<FloatResponseBody>(FLOAT_API_URL + '?url=' + previewUrl, {
-      // params: {
-      //   url: previewUrl
-      // }
     });
+    if (price) {
+      response.data.price = price
+    }
     return response.data;
   } catch (e) {
     console.log(e.message)
@@ -187,26 +210,30 @@ const logSkinsData = async (): Promise<void | undefined> => {
         continue;
       }
 
-      const previewLinks: string[] = [];
+      const previewLinks: { actionLink: string, price: number }[] = [];
       Object.keys(listinginfo).map(key => {
         if (listinginfo[key]) {
+          const price = listinginfo[key].converted_price / CONVERSION_RATE;
           let actionLink = listinginfo[key].asset.market_actions[0].link;
           actionLink = actionLink.replace('%assetid%', listinginfo[key].asset.id);
           actionLink = actionLink.replace('%listingid%', key);
-          previewLinks.push(actionLink)
+          previewLinks.push({ actionLink, price })
         }
       })
 
       const outputPromises: Promise<FloatResponseBody | undefined>[] = [];
-      previewLinks.forEach((previewLink) => {
-        const skinInfo = getSkinInfo(previewLink);
+      previewLinks.forEach(({ actionLink, price }) => {
+        const skinInfo = getSkinInfo(actionLink, price);
         outputPromises.push(skinInfo);
       })
 
       const output = await Promise.all(outputPromises);
       output.forEach(output => {
-        if (output && output.iteminfo)
-          logger.write(`${currentPagination} | LISTING_ID: ${output.iteminfo.m} | FLOAT: ${output.iteminfo.floatvalue}` + "\r\n", "utf8")
+        if (output && output.iteminfo) {
+          let convertedPrice: string = '';
+          if (output.price) convertedPrice = (output.price / CONVERSION_RATE).toFixed(2) + '€';
+          logger.write(`${currentPagination} | LISTING_ID: ${output.iteminfo.m} | PRICE: ${convertedPrice} | FLOAT: ${output.iteminfo.floatvalue}` + "\r\n", "utf8")
+        }
       })
       pagination.start += pagination.count;
     }
